@@ -31,6 +31,13 @@
     The directory is created if it does not exist.
     Defaults to $env:TEMP if the switch is provided without a value.
 
+.PARAMETER WhatIf
+    Dry-run mode. Shows the resolved archive path and the manifest
+    (file number, bytes, relative path) without performing any
+    verification or extraction. If -Output is also given, shows the
+    fully resolved destination path for each file. No files are read
+    beyond the archive header/manifest, and no output is written.
+
 .PARAMETER List
     Prints a per-file status table in addition to the summary. Valid in
     both verify and extract modes.
@@ -59,6 +66,15 @@
     Extracts all files, overwriting without prompting.
 
 .EXAMPLE
+    .\uncat.ps1 Handbook.md -WhatIf
+    Shows the archive path and manifest without verifying or extracting.
+
+.EXAMPLE
+    .\uncat.ps1 Handbook.md -Output C:\restore -WhatIf
+    Shows the manifest and the resolved destination path each file would
+    be extracted to, without writing anything.
+
+.EXAMPLE
     .\concat.ps1 | .\uncat.ps1
     Concatenates *.md files then immediately verifies the archive.
 
@@ -67,7 +83,7 @@
     Concatenates *.md files then verifies with a per-file status table.
 #>
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Position = 0, ValueFromPipeline)]
     [string] $Archive,
@@ -197,6 +213,51 @@ if (-not $trailerFound) {
 
 Write-Verbose "Manifest    : $($manifestFiles.Count) entries"
 Write-Verbose "Trailer     : reports $trailerCount file(s)"
+
+# ── WhatIf / dry-run ──────────────────────────────────────────────────────────
+# Only the header/manifest has been read at this point; no file blocks have
+# been parsed and no extraction-related I/O (directory creation, overwrite
+# checks, file writes) has happened.
+
+if ($WhatIfPreference) {
+    Write-Host ''
+    Write-Host 'WhatIf: no verification or extraction will be performed.'
+    Write-Host 'Archive to be read:'
+    Write-Host "  $archivePath"
+    Write-Host ''
+
+    if ($extractMode) {
+        Write-Host 'Files would be extracted to:'
+        Write-Host "  $outputDir"
+        Write-Host ''
+        Write-Host ('| {0,-4} | {1,8} | {2,-24} | {3}' -f
+            '#', 'Bytes', 'Relative Path', 'Destination')
+        Write-Host ('| {0,-4} | {1,8} | {2,-24} | {3}' -f
+            '----', '--------', '------------------------', '-----------')
+        foreach ($entry in $manifestFiles) {
+            $destPath = [IO.Path]::Combine(
+                $outputDir,
+                $entry.RelPath.Replace('/', [IO.Path]::DirectorySeparatorChar))
+            Write-Host ('| {0,-4} | {1,8} | "{2,-22}" | {3}' -f
+                $entry.Num, $entry.Bytes, $entry.RelPath, $destPath)
+        }
+    }
+    else {
+        Write-Host 'Manifest:'
+        Write-Host ''
+        Write-Host ('| {0,-4} | {1,8} | {2}' -f
+            '#', 'Bytes', 'Relative Path')
+        Write-Host ('| {0,-4} | {1,8} | {2}' -f
+            '----', '--------', '-------------')
+        foreach ($entry in $manifestFiles) {
+            Write-Host ('| {0,-4} | {1,8} | "{2}"' -f
+                $entry.Num, $entry.Bytes, $entry.RelPath)
+        }
+    }
+
+    Write-Host ''
+    exit 0
+}
 
 # ── Pass 2: parse file blocks ─────────────────────────────────────────────────
 

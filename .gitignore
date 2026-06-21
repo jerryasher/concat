@@ -30,6 +30,18 @@
 *.exe
 *.out
 *.app
-*.ps1~
-*.md~
+
+# Archive Tests for this project
+
 Handbook.md
+*tar
+
+# Emacs
+*~
+\#*#
+.#*
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp

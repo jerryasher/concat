@@ -123,20 +123,47 @@ function Resolve-OutputPath {
     return [IO.Path]::Combine((Get-Location).Path, $OutputParam)
 }
 
-# Canonicalize a path to a forward-slash relative path from PS CWD.
+# Canonicalize a path to a forward-slash relative path from PS CWD, using
+# tar-like semantics: files outside the CWD's subtree are expressed with
+# leading ".." segments rather than collapsed to an absolute path.
+# Normalize to backslashes first: Get-Item preserves whatever separator
+# style was used on the command line, so mixing ..\ and ../ args would
+# otherwise cause segment comparison to fail.
 function Get-RelativePath {
     param([string] $FullPath)
-    $cwd = (Get-Location).Path.TrimEnd(
-               [IO.Path]::DirectorySeparatorChar) +
-           [IO.Path]::DirectorySeparatorChar
-    $rel = if ($FullPath.StartsWith(
-                   $cwd, [StringComparison]::OrdinalIgnoreCase)) {
-               $FullPath.Substring($cwd.Length)
-           }
-           else {
-               $FullPath
-           }
-    return $rel.Replace('\', '/')
+
+    $normalized = $FullPath.Replace('/', '\')
+    $cwd        = (Get-Location).Path.Replace('/', '\')
+
+    $splitOpts      = [StringSplitOptions]::RemoveEmptyEntries
+    $targetSegments = $normalized.Split([char[]]@('\'), $splitOpts)
+    $cwdSegments    = $cwd.Split([char[]]@('\'), $splitOpts)
+
+    # Length of the shared leading path, compared case-insensitively
+    # since Windows paths (including drive letters) are case-insensitive.
+    $common = 0
+    while ($common -lt $cwdSegments.Length -and
+           $common -lt $targetSegments.Length -and
+           [string]::Equals($cwdSegments[$common], $targetSegments[$common],
+               [StringComparison]::OrdinalIgnoreCase)) {
+        $common++
+    }
+
+    # No shared root at all (e.g. a different drive letter): no relative
+    # path can express this, so fall back to the absolute path.
+    if ($common -eq 0) {
+        Write-Verbose "Cross-volume path, storing absolute: $normalized"
+        return $normalized.Replace('\', '/')
+    }
+
+    $upCount      = $cwdSegments.Length - $common
+    $downSegments = @($targetSegments[$common..($targetSegments.Length - 1)])
+
+    $parts = @()
+    for ($u = 0; $u -lt $upCount; $u++) { $parts += '..' }
+    $parts += $downSegments
+
+    return ($parts -join '/')
 }
 
 # Validate that a file's raw bytes are valid UTF-8. Returns nothing on

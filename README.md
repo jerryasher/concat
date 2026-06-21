@@ -36,14 +36,55 @@ All paths are resolved relative to the caller's PowerShell working directory
 (`Get-Location`). The location of `concat.ps1` itself MUST NOT influence
 where output is written or how relative paths are computed.
 
+Input paths MUST be canonicalized to backslashes before comparing against
+`Get-Location`, because `Get-Item` preserves whatever separator style was
+used on the command line. Mixing `..\` and `../` arguments would otherwise
+cause segment comparison to fail, producing absolute paths in the
+manifest instead of relative ones.
+
+All paths stored in the archive MUST use forward slashes regardless of
+how they were specified on the command line.
+
+### Tar-Like Relative Paths
+
+Relative paths in the manifest MUST be computed the way `tar` would
+express them: the shortest path, relative to the current working
+directory, that reaches the file — using leading `../` segments for
+files outside the working directory's subtree, rather than collapsing
+them to an absolute path.
+
+This is computed by comparing the path segments of the resolved absolute
+file path against the path segments of the current working directory,
+finding the longest shared prefix, and then emitting one `..` for each
+remaining working-directory segment followed by the remaining file
+segments. A file directly inside (or beneath) the working directory
+therefore has no leading `..`; a file in a sibling or ancestor directory
+does.
+
+If the file and the working directory do not share a common root at all
+(for example, the file is on a different drive letter on Windows), no
+relative path can express the relationship. In that case the full
+absolute path is stored instead, normalized to forward slashes.
+
 Example: running the script from a different directory still writes output
-to the caller's working directory:
+to the caller's working directory, and relative paths are stored correctly
+regardless of input separator style:
 
 ```powershell
 Set-Location C:\Projects\Homelab
-..\tools\concat.ps1
+..\tools\concat.ps1 ..\docs\setup.md ../notes.md
 # writes C:\Projects\Homelab\Handbook.md
+# manifest stores: "../docs/setup.md" and "../notes.md"
 ```
+
+Example of files reached from a subdirectory, mixing separator styles:
+
+```powershell
+Set-Location C:\me\workspace\concat\foo
+..\concat.ps1 ..\lorem.md ../LICENSE
+# manifest stores: "../lorem.md" and "../LICENSE"
+```
+
 
 ## Parameters
 
@@ -372,6 +413,9 @@ Requires **PowerShell 5.1**. No external modules or dependencies.
   both file header and trailer.
 - With `-Output <dir>`: extract mode. Recreates files and subdirectory
   structure under the specified directory.
+- With `-WhatIf`: dry-run mode. Reports the archive path and manifest
+  (and, with `-Output`, destination paths) without verifying, reading
+  file blocks, or writing anything.
 - Reports up to 10 verification errors before halting.
 - Exits 0 on success, 1 on any verification or extraction failure.
 - Accepts the archive path from the pipeline for use with `concat.ps1`.
@@ -385,6 +429,13 @@ Requires **PowerShell 5.1**. No external modules or dependencies.
   Directory to extract files into. Created if it does not exist.
   Defaults to `$env:TEMP` if the switch is provided without a value.
   If omitted entirely, runs in verify mode.
+
+- **`-WhatIf`**
+  Dry-run mode. Shows the resolved archive path and the manifest
+  (file number, bytes, relative path) without verifying or extracting
+  anything. If `-Output` is also given, additionally shows the fully
+  resolved destination path each file would be extracted to. No file
+  I/O occurs beyond reading the archive header/manifest. Exit code 0.
 
 - **`-List`**
   Prints a per-file status table in addition to the summary. Valid in
@@ -441,6 +492,46 @@ Overwrite? [Y/N]:
 Extracted 14 file(s) to:
   C:\restore
 ```
+
+## WhatIf Mode
+
+`-WhatIf` is a dry run: it parses only the archive header/manifest (no
+file blocks are parsed, no directories are created, no files are written
+or read for extraction) and reports what would happen.
+
+In verify mode (`-Output` omitted):
+
+```
+WhatIf: no verification or extraction will be performed.
+Archive to be read:
+  C:\me\workspace\Homelab\Handbook.md
+
+Manifest:
+
+| #    |    Bytes | Relative Path
+| ---- | -------- | -------------
+|    1 |     4821 | "docs/setup.md"
+|    2 |     1203 | "README.md"
+```
+
+In extract mode (`-Output` given), each manifest row additionally shows
+the fully resolved destination path:
+
+```
+WhatIf: no verification or extraction will be performed.
+Archive to be read:
+  C:\me\workspace\Homelab\Handbook.md
+
+Files would be extracted to:
+  C:\restore
+
+| #    |    Bytes | Relative Path            | Destination
+| ---- | -------- | ------------------------ | -----------
+|    1 |     4821 | "docs/setup.md"          | C:\restore\docs\setup.md
+|    2 |     1203 | "README.md"              | C:\restore\README.md
+```
+
+Exit code is 0 in both cases.
 
 ## Pipeline Usage
 
