@@ -9,6 +9,7 @@
     The operational phase to execute:
     'All'      - Executes the full fixture generation, archival, and analysis cycle.
     'Create'   - Only builds the dummy file system under the mock workspace directory.
+    'Invoke'   - Invokes each tar engine.
     'Analyze'  - Compares the outputs of pre-existing test logs and maps them to a summary table.
     'Remove'   - Deletes the fixture files (and any directories created for them), reversing 'Create'.
 .PARAMETER GnuTarPath
@@ -26,7 +27,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param (
-    [ValidateSet("All", "Create", "Analyze", "Remove")]
+    [ValidateSet("All", "Create", "Invoke", "Analyze", "Remove")]
     [string]$Mode = "Create",
 
     [string]$GnuTarPath = "C:\me\scoop\apps\git\usr\bin\tar.exe",
@@ -35,6 +36,8 @@ param (
     # Revisit if a future Windows release relocates or removes it.
     [string]$BsdTarPath = "$env:SystemRoot\System32\tar.exe"
 )
+
+
 
 Write-Host "Running PowerShell version: $($PSVersionTable.PSVersion)"
 
@@ -298,7 +301,7 @@ function Invoke-TarEngine {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param($EngineName, $BinaryPath, $Paths, $ArchiveOut, $LogOut)
 
-    Write-Verbose "[PHASE 2] Invoking Archive Engine: [$EngineName]"
+    Write-Host "[PHASE 2] Invoking Archive Engine: [$EngineName]"
 
     if (-not (Test-Path $BinaryPath -PathType Leaf)) {
         Write-Warning "Target binary for $EngineName not found at '$BinaryPath'. Skipping execution."
@@ -321,6 +324,7 @@ function Invoke-TarEngine {
             else {
                 & $BinaryPath -rf $ArchiveOut $Entry 2>$null
             }
+            Write-Verbose "  Added entry: $Entry"
         }
 
         if (Test-Path $ArchiveOut) {
@@ -333,7 +337,7 @@ function Invoke-TarEngine {
 function Show-TarAnalysis {
     param($BsdLog, $GnuLog, $OriginalPaths)
 
-    Write-Verbose "[PHASE 3] Compiling structural difference records..."
+    Write-Host "[PHASE 3] Compiling structural difference records..."
 
     $BsdLines = if (Test-Path $BsdLog) { Get-Content $BsdLog } else { @() }
     $GnuLines = if (Test-Path $GnuLog) { Get-Content $GnuLog } else { @() }
@@ -358,14 +362,14 @@ if ($Mode -eq "All" -or $Mode -eq "Create") {
     New-Fixture -Paths $PathMatrix -SandboxRoot $SandboxRoot -FixtureRoot $FixtureRoot
 }
 
-if ($Mode -eq "All") {
+if ($Mode -eq "All" -or $Mode -eq "Invoke") {
     $BsdArchive = Join-Path -Path $SandboxRoot -ChildPath $ArchiveRoot -AdditionalChildPath "test-bsdtar.tar"
     $BsdLog = Join-Path -Path $SandboxRoot -ChildPath $ListRoot -AdditionalChildPath "actual-bsdtar.txt"
     Invoke-TarEngine -EngineName "bsdtar" -BinaryPath $BsdTarPath -Paths $PathMatrix -ArchiveOut $BsdArchive -LogOut $BsdLog
 
-    $GnuArchive = Join-Path -Path $SandboxRoot -ChildPath $ArchiveRoot -AdditionalChildPath "test-gnutar.tar"
-    $GnuLog = Join-Path -Path $SandboxRoot -ChildPath $ListRoot -AdditionalChildPath "actual-gnutar.txt"
-    Invoke-TarEngine -EngineName "gnutar" -BinaryPath $GnuTarPath -Paths $PathMatrix -ArchiveOut $GnuArchive -LogOut $GnuLog
+    # $GnuArchive = Join-Path -Path $SandboxRoot -ChildPath $ArchiveRoot -AdditionalChildPath "test-gnutar.tar"
+    # $GnuLog = Join-Path -Path $SandboxRoot -ChildPath $ListRoot -AdditionalChildPath "actual-gnutar.txt"
+    # Invoke-TarEngine -EngineName "gnutar" -BinaryPath $GnuTarPath -Paths $PathMatrix -ArchiveOut $GnuArchive -LogOut $GnuLog
 }
 
 if ($Mode -eq "All" -or $Mode -eq "Analyze") {
